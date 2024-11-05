@@ -8,18 +8,12 @@ contract BendLottery is BGTTogetherVault {
     address public constant BEND = 0x1339503343be5626B40Ee3Aee12a4DF50Aa4C0B9;
 
     constructor(
-        address _rewardsVault,
-        address _vrfCoordinator,
-        bytes32 _keyHash,
-        uint64 _subscriptionId
+        address _rewardsVault
     ) BGTTogetherVault(
         BEND,
         _rewardsVault,
-        _vrfCoordinator,
-        _keyHash,
-        _subscriptionId,
-        "BEND Lottery",
-        "BEND-LT"
+        "przBEND",
+        "przBEND"
     ) {}
 
     function deposit(uint256 amount) external returns (uint256 shares) {

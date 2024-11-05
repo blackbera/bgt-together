@@ -8,18 +8,12 @@ contract HoneyWBERALottery is BGTTogetherVault {
     address public constant BEX_LP = 0xd28d852cbcc68DCEC922f6d5C7a8185dBaa104B7;
 
     constructor(
-        address _rewardsVault,
-        address _vrfCoordinator,
-        bytes32 _keyHash,
-        uint64 _subscriptionId
+        address _rewardsVault
     ) BGTTogetherVault(
-        BEX_LP,              // asset (LP token)
-        _rewardsVault,       // BerachainRewardsVault
-        _vrfCoordinator,     // Chainlink VRF
-        _keyHash,            // VRF key hash
-        _subscriptionId,     // VRF subscription ID
-        "Honey WBERA Lottery", // vault name
-        "hWBERA-LT"           // vault symbol
+        BEX_LP,
+        _rewardsVault,
+        "przHONEYWBERA",
+        "przHWBERA"
     ) {}
 
     function deposit(uint256 amount) external returns (uint256 shares) {

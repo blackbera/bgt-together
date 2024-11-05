@@ -8,18 +8,12 @@ contract HoneyUSDCKodiakLottery is BGTTogetherVault {
     address public constant HONEY_USDC = 0xb73deE52F38539bA854979eab6342A60dD4C8c03;
 
     constructor(
-        address _rewardsVault,
-        address _vrfCoordinator,
-        bytes32 _keyHash,
-        uint64 _subscriptionId
+        address _rewardsVault
     ) BGTTogetherVault(
         HONEY_USDC,
         _rewardsVault,
-        _vrfCoordinator,
-        _keyHash,
-        _subscriptionId,
-        "HONEY/USDC-Kodiak Lottery",
-        "HONEY/USDC-K-LT"
+        "przHONEYUSDC",
+        "przHUSDC"
     ) {}
 
     function deposit(uint256 amount) external returns (uint256 shares) {

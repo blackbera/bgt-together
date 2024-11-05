@@ -8,18 +8,12 @@ contract YeetKodiakLottery is BGTTogetherVault {
     address public constant YEET_KODIAK = 0xE5A2ab5D2fb268E5fF43A5564e44c3309609aFF9;
 
     constructor(
-        address _rewardsVault,
-        address _vrfCoordinator,
-        bytes32 _keyHash,
-        uint64 _subscriptionId
+        address _rewardsVault
     ) BGTTogetherVault(
         YEET_KODIAK,
         _rewardsVault,
-        _vrfCoordinator,
-        _keyHash,
-        _subscriptionId,
-        "Yeet-Kodiak Lottery",
-        "YEET-K-LT"
+        "przYEETK",
+        "przYEETK"
     ) {}
 
     function deposit(uint256 amount) external returns (uint256 shares) {

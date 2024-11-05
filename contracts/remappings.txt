@@ -18,3 +18,4 @@ solady/src/=lib/contracts-monorepo/lib/solady/src/
 solady/test/=lib/contracts-monorepo/lib/solady/test/
 solidity-stringutils/=lib/contracts-monorepo/lib/openzeppelin-foundry-upgrades/lib/solidity-stringutils/
 transient-goodies/=lib/contracts-monorepo/lib/transient-goodies/src/
+vrf-contracts/=lib/vrf-contracts/contracts/

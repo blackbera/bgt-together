@@ -8,18 +8,12 @@ contract BERPsLottery is BGTTogetherVault {
     address public constant BERPS = 0x1306D3c36eC7E38dd2c128fBe3097C2C2449af64;
 
     constructor(
-        address _rewardsVault,
-        address _vrfCoordinator,
-        bytes32 _keyHash,
-        uint64 _subscriptionId
+        address _rewardsVault
     ) BGTTogetherVault(
         BERPS,
         _rewardsVault,
-        _vrfCoordinator,
-        _keyHash,
-        _subscriptionId,
-        "BERPs Lottery",
-        "BERPs-LT"
+        "przBERPS",
+        "przBERPS"
     ) {}
 
     function deposit(uint256 amount) external returns (uint256 shares) {

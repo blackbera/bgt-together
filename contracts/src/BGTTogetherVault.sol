@@ -5,11 +5,10 @@ import { ERC4626 } from "openzeppelin-contracts/contracts/token/ERC20/extensions
 import { ERC20 } from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import { VRFConsumerBaseV2 } from "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
-import { VRFCoordinatorV2Interface } from "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
+import { GelatoVRFConsumerBase } from "vrf-contracts/GelatoVRFConsumerBase.sol";
 import { IBerachainRewardsVault } from "contracts-monorepo/src/pol/interfaces/IBerachainRewardsVault.sol";
 
-abstract contract BGTTogetherVault is ERC4626, VRFConsumerBaseV2 {
+abstract contract BGTTogetherVault is ERC4626, GelatoVRFConsumerBase {
     using SafeERC20 for IERC20;
 
     // Constants 
@@ -17,11 +16,6 @@ abstract contract BGTTogetherVault is ERC4626, VRFConsumerBaseV2 {
     
     // State variables
     IBerachainRewardsVault public immutable rewardsVault;
-    VRFCoordinatorV2Interface public immutable vrfCoordinator;
-    
-    bytes32 public immutable keyHash;
-    uint64 public immutable subscriptionId;
-    uint32 public immutable callbackGasLimit;
     
     uint256 public lastHarvestTime;
     uint256 public currentEpoch;
@@ -32,26 +26,19 @@ abstract contract BGTTogetherVault is ERC4626, VRFConsumerBaseV2 {
     
     // Events
     event PrizeAwarded(address winner, uint256 amount, uint256 epoch);
-    event HarvestInitiated(uint256 epoch);
+    event HarvestInitiated(uint256 epoch); 
     
     constructor(
         address _asset,
         address _rewardsVault,
-        address _vrfCoordinator,
-        bytes32 _keyHash,
-        uint64 _subscriptionId,
         string memory _name,
         string memory _symbol
     ) 
         ERC4626(IERC20(_asset))
         ERC20(_name, _symbol)
-        VRFConsumerBaseV2(_vrfCoordinator)
+        GelatoVRFConsumerBase()
     {
         rewardsVault = IBerachainRewardsVault(_rewardsVault);
-        vrfCoordinator = VRFCoordinatorV2Interface(_vrfCoordinator);
-        keyHash = _keyHash;
-        subscriptionId = _subscriptionId;
-        callbackGasLimit = 100000;
         
         // Approve rewards vault to spend our asset
         IERC20(_asset).approve(_rewardsVault, type(uint256).max);
@@ -83,35 +70,32 @@ abstract contract BGTTogetherVault is ERC4626, VRFConsumerBaseV2 {
         currentEpoch++;
         lastHarvestTime = block.timestamp;
         
-        // Request random winner
-        vrfCoordinator.requestRandomWords(
-            keyHash,
-            subscriptionId,
-            3, // requestConfirmations
-            callbackGasLimit,
-            1 // numWords
-        );
+        // Request random winner using Gelato VRF
+        bytes memory data = abi.encode(currentEpoch);
+        _requestRandomness(data);
         
         emit HarvestInitiated(currentEpoch);
     }
 
-    // VRF Callback to select winner
-    function fulfillRandomWords(uint256, uint256[] memory randomWords) internal override {
+    // Gelato VRF Callback
+    function _fulfillRandomness(
+        uint256 randomness,
+        uint256 requestId,
+        bytes memory extraData
+    ) internal virtual override {
         uint256 totalSupply = totalSupply();
         require(totalSupply > 0, "No participants");
         
-        // Select winner based on random number
-        uint256 winnerIndex = randomWords[0] % totalSupply;
+        uint256 winnerIndex = randomness % totalSupply;
         address winner = _selectWinner(winnerIndex);
         
-        uint256 prizeAmount = IERC20(rewardToken()).balanceOf(address(this));
-        IERC20(rewardToken()).safeTransfer(winner, prizeAmount);
+        uint256 prizeAmount = rewardsVault.getReward(address(this), winner);
         
-        // Store winner and prize amount for this epoch
-        epochWinners[currentEpoch] = winner;
-        epochPrizeAmounts[currentEpoch] = prizeAmount;
+        uint256 epoch = abi.decode(extraData, (uint256));
+        epochWinners[epoch] = winner;
+        epochPrizeAmounts[epoch] = prizeAmount;
         
-        emit PrizeAwarded(winner, prizeAmount, currentEpoch);
+        emit PrizeAwarded(winner, prizeAmount, epoch);
     }
 
     function _selectWinner(uint256 index) internal view returns (address) {
@@ -165,5 +149,9 @@ abstract contract BGTTogetherVault is ERC4626, VRFConsumerBaseV2 {
     
     function getCurrentVaultRewards() public view returns (uint256) {
         return rewardsVault.earned(address(this));
+    }
+
+    function _operator() internal view virtual override returns (address) {
+        return 0xB38D2cF1024731d4cAcD8ED70BDa77aC93022911;
     }
 }
