@@ -8,18 +8,12 @@ contract IBGTWBERAKodiakLottery is BGTTogetherVault {
     address public constant IBGT_WBERA = 0x7fd165B73775884a38AA8f2B384A53A3Ca7400E6;
 
     constructor(
-        address _rewardsVault,
-        address _vrfCoordinator,
-        bytes32 _keyHash,
-        uint64 _subscriptionId
+        address _rewardsVault
     ) BGTTogetherVault(
         IBGT_WBERA,
         _rewardsVault,
-        _vrfCoordinator,
-        _keyHash,
-        _subscriptionId,
-        "iBGT/WBERA-Kodiak Lottery",
-        "iBGT/WBERA-K-LT"
+        "przIBGTWBERA",
+        "przIBGTWBERA"
     ) {}
 
     function deposit(uint256 amount) external returns (uint256 shares) {
