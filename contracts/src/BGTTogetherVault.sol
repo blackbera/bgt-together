@@ -8,6 +8,12 @@ import { SafeERC20 } from "openzeppelin-contracts/contracts/token/ERC20/utils/Sa
 import { GelatoVRFConsumerBase } from "vrf-contracts/GelatoVRFConsumerBase.sol";
 import { IBerachainRewardsVault } from "contracts-monorepo/src/pol/interfaces/IBerachainRewardsVault.sol";
 
+/* 
+Feedback from Manny  
+- How does the end claiming work? 
+- If the prize tokens are transferrable, how does it affect the underlying lottery? 
+*/
+
 abstract contract BGTTogetherVault is ERC4626, GelatoVRFConsumerBase {
     using SafeERC20 for IERC20;
 
