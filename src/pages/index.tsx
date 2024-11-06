@@ -2,7 +2,8 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import type { NextPage } from 'next';
 import Head from 'next/head';
 import { LotteryTile } from '../components/LotteryTile';
-import { Navbar } from '../components/Navbar';
+import Image from 'next/image';
+import { CountdownTimer } from '../components/CountdownTimer';
 
 const LOTTERY_CONTRACTS = [
   {
@@ -53,21 +54,36 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-[#1A1B23] bg-[url('/homepage.png')] bg-cover bg-center bg-fixed">
       <div className="min-h-screen bg-black/50 backdrop-blur-sm">
-        <Navbar>
+        <div className="absolute top-6 right-6">
           <ConnectButton />
-        </Navbar>
+        </div>
 
         <main className="max-w-7xl mx-auto px-6 py-20">
           <div className="text-center mb-20">
-            <h1 className="text-6xl font-bold text-white mb-6">
-              Deposit Tokens to Win{' '}
+            <div className="flex items-center justify-center gap-6 mb-6">
+              <Image
+                src="/bgt.png"
+                alt="BGT Logo"
+                width={100}
+                height={100}
+                className="w-24 h-24"
+              />
+              <h1 className="text-6xl font-bold">
+                <span className="bg-gradient-to-r from-amber-200 to-yellow-400 bg-clip-text text-transparent">
+                  BGT Together
+                </span>
+              </h1>
+            </div>
+            
+            <p className="text-xl mb-8 font-bold">
+              <span className="text-white">Deposit your staking tokens in these lottery vaults</span>
+              {' '}
               <span className="bg-gradient-to-r from-amber-200 to-yellow-400 bg-clip-text text-transparent">
-                The BGT Lottery
+                with a chance to win the vaults BGT rewards of that week
               </span>
-            </h1>
-            <p className="text-amber-200/80 text-xl">
-              You can withdraw your full deposit at any time
             </p>
+
+            <CountdownTimer />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">

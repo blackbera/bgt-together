@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { DepositModal } from './DepositModal';
+import { useBGTPrice } from '../hooks/useBGTPrice';
 
 interface LotteryTileProps {
   name: string;
@@ -11,9 +12,12 @@ interface LotteryTileProps {
 
 export function LotteryTile({ name, symbol, address, grandPrize, bgtAmount }: LotteryTileProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const bgtPrice = 7; // $7 per BGT
-  const usdValue = Number(bgtAmount.replace(/,/g, '')) * bgtPrice;
+  const { bgtPrice } = useBGTPrice();
   
+  const usdValue = bgtPrice 
+    ? Number(bgtAmount.replace(/,/g, '')) * bgtPrice
+    : 0;
+
   return (
     <>
       <div onClick={() => setIsModalOpen(true)} 
@@ -41,7 +45,7 @@ export function LotteryTile({ name, symbol, address, grandPrize, bgtAmount }: Lo
             {grandPrize} BGT
           </div>
           <div className="text-sm text-amber-200/60">
-            ≈ ${usdValue.toLocaleString()}
+            ≈ ${usdValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
           </div>
         </div>
       </div>
