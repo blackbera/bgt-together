@@ -1,20 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import { IERC20 } from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20.sol";
-import { SafeERC20 } from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20.sol";
-import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
-import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import { Ownable } from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import { GelatoVRFConsumerBase } from "vrf-contracts/GelatoVRFConsumerBase.sol";
 import { IBerachainRewardsVault } from "contracts-monorepo/src/pol/interfaces/IBerachainRewardsVault.sol";
 
-contract LotteryVault is 
-    Initializable, 
-    PausableUpgradeable, 
-    ReentrancyGuardUpgradeable,
-    GelatoVRFConsumerBase 
-{
+contract LotteryVault is GelatoVRFConsumerBase, Ownable {
     using SafeERC20 for IERC20;
 
     // Events
@@ -22,14 +15,18 @@ contract LotteryVault is
     event LotteryWinner(address indexed winner, uint256 amount);
     event IncentiveAdded(uint256 amount);
     event DrawInitiated(uint256 lotteryId);
+    event LotteryStarted(uint256 lotteryId, uint256 ticketPrice, uint256 endTime);
 
     // Errors
     error InvalidAmount();
     error LotteryNotEnded();
     error LotteryEnded();
-    error NotAuthorized();
     error NoParticipants();
     error DrawInProgress();
+    error NoActiveLottery();
+    error LotteryAlreadyActive();
+    error InvalidTicketPrice();
+    error InvalidDuration();
 
     // Constants
     uint256 private constant PURCHASE_FEE = 100; // 1%
@@ -47,39 +44,40 @@ contract LotteryVault is
     uint256 public totalPool;
     
     bool public drawInProgress;
+    bool public lotteryActive;
     
-    // Mapping of lottery ID to participant addresses
+    // Mappings
     mapping(uint256 => address[]) public lotteryParticipants;
-    // Mapping of address to ticket count for current lottery
     mapping(address => uint256) public userTicketCount;
-    // Mapping to track lottery results
     mapping(uint256 => address) public lotteryWinners;
     mapping(uint256 => uint256) public lotteryPrizes;
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers();
-    }
-
-    function initialize(
+    constructor(
         address _paymentToken,
         address _incentiveToken,
-        address _berachainVault,
-        uint256 _ticketPrice
-    ) external initializer {
-        __Pausable_init();
-        __ReentrancyGuard_init();
-
+        address _berachainVault, 
+        address _owner
+    ) GelatoVRFConsumerBase() Ownable(_owner) {
         paymentToken = IERC20(_paymentToken);
         incentiveToken = IERC20(_incentiveToken);
         berachainVault = IBerachainRewardsVault(_berachainVault);
-        ticketPrice = _ticketPrice;
-
-        lotteryEndTime = block.timestamp + 1 days;
         currentLotteryId = 1;
     }
 
-    function purchaseTicket(uint256 amount) external nonReentrant whenNotPaused {
+    function startLottery(uint256 _ticketPrice, uint256 _duration) external onlyOwner {
+        if (lotteryActive) revert LotteryAlreadyActive();
+        if (_ticketPrice == 0) revert InvalidTicketPrice();
+        if (_duration == 0) revert InvalidDuration();
+
+        ticketPrice = _ticketPrice;
+        lotteryEndTime = block.timestamp + _duration;
+        lotteryActive = true;
+
+        emit LotteryStarted(currentLotteryId, ticketPrice, lotteryEndTime);
+    }
+
+    function purchaseTicket(uint256 amount) external {
+        if (!lotteryActive) revert NoActiveLottery();
         if (block.timestamp >= lotteryEndTime) revert LotteryEnded();
         if (amount == 0) revert InvalidAmount();
 
@@ -98,14 +96,14 @@ contract LotteryVault is
         paymentToken.approve(address(berachainVault), purchaseFee);
         berachainVault.addIncentive(address(paymentToken), purchaseFee, 0);
 
-        // Record participation
         lotteryParticipants[currentLotteryId].push(msg.sender);
         userTicketCount[msg.sender] += amount;
 
         emit TicketPurchased(msg.sender, currentLotteryId, amount);
     }
 
-    function initiateDraw() external nonReentrant {
+    function initiateDraw() external {
+        if (!lotteryActive) revert NoActiveLottery();
         if (block.timestamp < lotteryEndTime) revert LotteryNotEnded();
         if (lotteryParticipants[currentLotteryId].length == 0) revert NoParticipants();
         if (drawInProgress) revert DrawInProgress();
@@ -126,23 +124,18 @@ contract LotteryVault is
     ) internal override {
         (uint256 lotteryId, uint256 prizePool) = abi.decode(extraData, (uint256, uint256));
         
-        // Select winner
         uint256 participantCount = lotteryParticipants[lotteryId].length;
         uint256 winnerIndex = randomness % participantCount;
         address winner = lotteryParticipants[lotteryId][winnerIndex];
         
-        // Calculate prizes
         uint256 winnerFee = (prizePool * WINNER_FEE) / FEE_DENOMINATOR;
         uint256 winnerPrize = prizePool - winnerFee;
 
-        // Transfer prize to winner
         paymentToken.safeTransfer(winner, winnerPrize);
 
-        // Add winner fee as incentive
         paymentToken.approve(address(berachainVault), winnerFee);
         berachainVault.addIncentive(address(paymentToken), winnerFee, 0);
 
-        // Record results
         lotteryWinners[lotteryId] = winner;
         lotteryPrizes[lotteryId] = winnerPrize;
 
@@ -183,6 +176,6 @@ contract LotteryVault is
     }
 
     function _operator() internal view virtual override returns (address) {
-        return 0xB38D2cF1024731d4cAcD8ED70BDa77aC93022911; // Replace with actual operator
+        return 0xB38D2cF1024731d4cAcD8ED70BDa77aC93022911;
     }
 } 
