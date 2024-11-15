@@ -13,6 +13,3 @@
 [submodule "contracts/lib/solady"]
 	path = contracts/lib/solady
 	url = https://github.com/transmissions11/solady
-[submodule "lib/contracts-monorepo"]
-	path = lib/contracts-monorepo
-	url = https://github.com/berachain/contracts-monorepo
