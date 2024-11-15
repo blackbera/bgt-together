@@ -2,10 +2,24 @@
 pragma solidity ^0.8.19;
 
 import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { ERC20 } from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 import { SafeERC20 } from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable } from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import { GelatoVRFConsumerBase } from "vrf-contracts/GelatoVRFConsumerBase.sol";
-import { IBerachainRewardsVault } from "contracts-monorepo/src/pol/interfaces/IBerachainRewardsVault.sol";
+import { IBerachainRewardsVault } from "contracts-monorepo/pol/interfaces/IBerachainRewardsVault.sol";
+import { PrzHoney } from "./PrzHoney.sol";
+
+contract LotteryReceiptToken is ERC20 {
+    constructor() ERC20("przHoney", "przHoney") {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function burn(address from, uint256 amount) external {
+        _burn(from, amount);
+    }
+}
 
 contract LotteryVault is GelatoVRFConsumerBase, Ownable {
     using SafeERC20 for IERC20;
@@ -16,6 +30,10 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
     event IncentiveAdded(uint256 amount);
     event DrawInitiated(uint256 lotteryId);
     event LotteryStarted(uint256 lotteryId, uint256 ticketPrice, uint256 endTime);
+    event RewardClaimed(address indexed winner, uint256 amount);
+    event ReceiptTokensBurned(address indexed user, uint256 amount);
+    event WithdrawalFailed(address indexed participant, uint256 amount);
+    event PrzHoneySet(address przHoney);
 
     // Errors
     error InvalidAmount();
@@ -27,16 +45,20 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
     error LotteryAlreadyActive();
     error InvalidTicketPrice();
     error InvalidDuration();
+    error NotWinner();
+    error InsufficientGasReserves();
+    error StakingNotAllowed();
 
     // Constants
     uint256 private constant PURCHASE_FEE = 100; // 1%
     uint256 private constant WINNER_FEE = 300; // 3%
     uint256 private constant FEE_DENOMINATOR = 10000;
+    uint256 private constant MIN_GAS_RESERVE = 1 ether; // Minimum ETH to keep for gas
 
     // State variables
     IERC20 public paymentToken;
-    IERC20 public incentiveToken;
-    IBerachainRewardsVault public berachainVault;
+    PrzHoney public receiptToken;
+    IBerachainRewardsVault public rewardVault;
     
     uint256 public lotteryEndTime;
     uint256 public currentLotteryId;
@@ -51,35 +73,57 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
     mapping(address => uint256) public userTicketCount;
     mapping(uint256 => address) public lotteryWinners;
     mapping(uint256 => uint256) public lotteryPrizes;
+    mapping(uint256 => bool) public prizesClaimed;
 
     constructor(
         address _paymentToken,
-        address _incentiveToken,
-        address _berachainVault, 
-        address _owner
-    ) GelatoVRFConsumerBase() Ownable(_owner) {
+        address _owner,
+        address _rewardVault
+    ) GelatoVRFConsumerBase() Ownable(_owner) payable {
+        require(msg.value >= MIN_GAS_RESERVE, "Insufficient initial gas reserves");
         paymentToken = IERC20(_paymentToken);
-        incentiveToken = IERC20(_incentiveToken);
-        berachainVault = IBerachainRewardsVault(_berachainVault);
+        rewardVault = IBerachainRewardsVault(_rewardVault);
         currentLotteryId = 1;
     }
 
-    function startLottery(uint256 _ticketPrice, uint256 _duration) external onlyOwner {
-        if (lotteryActive) revert LotteryAlreadyActive();
-        if (_ticketPrice == 0) revert InvalidTicketPrice();
-        if (_duration == 0) revert InvalidDuration();
+    // Allow contract to receive ETH
+    receive() external payable {}
 
-        ticketPrice = _ticketPrice;
-        lotteryEndTime = block.timestamp + _duration;
+    function claimReward(uint256 lotteryId) external {
+        address winner = lotteryWinners[lotteryId];
+        require(winner != address(0), "No winner for this lottery");
+        require(!prizesClaimed[lotteryId], "Prize already claimed");
+        
+        uint256 prize = lotteryPrizes[lotteryId];
+        require(prize > 0, "No prize available");
+
+        prizesClaimed[lotteryId] = true;
+        paymentToken.safeTransfer(winner, prize);
+
+        // Burn receipt tokens from winner
+        uint256 winnerTickets = userTicketCount[winner];
+        receiptToken.burn(winner, winnerTickets);
+
+        emit RewardClaimed(winner, prize);
+        emit ReceiptTokensBurned(winner, winnerTickets);
+
+        // Reset lottery
+        _startNewLottery();
+    }
+
+    function _startNewLottery() internal {
+        totalPool = 0;
+        currentLotteryId += 1;
+        lotteryEndTime = block.timestamp + 1 days;
+        drawInProgress = false;
         lotteryActive = true;
-
-        emit LotteryStarted(currentLotteryId, ticketPrice, lotteryEndTime);
     }
 
     function purchaseTicket(uint256 amount) external {
         if (!lotteryActive) revert NoActiveLottery();
         if (block.timestamp >= lotteryEndTime) revert LotteryEnded();
         if (amount == 0) revert InvalidAmount();
+        if (address(this).balance < MIN_GAS_RESERVE) revert InsufficientGasReserves();
 
         uint256 totalCost = amount * ticketPrice;
         uint256 purchaseFee = (totalCost * PURCHASE_FEE) / FEE_DENOMINATOR;
@@ -87,19 +131,33 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
         paymentToken.safeTransferFrom(msg.sender, address(this), totalCost);
         totalPool += (totalCost - purchaseFee);
         
-        // Mint incentive tokens and delegate stake them
-        incentiveToken.safeTransfer(msg.sender, amount);
-        incentiveToken.approve(address(berachainVault), amount);
-        berachainVault.delegateStake(msg.sender, amount);
+        // Mint receipt tokens directly to vault
+        receiptToken.mint(address(this), amount);
+        receiptToken.approve(address(this), amount);
+    
+        // Approve reward vault to spend tokens
+        receiptToken.approve(address(rewardVault), amount);
+    
+        // Delegate stake with receipt tokens
+        rewardVault.delegateStake(address(this), amount);
 
-        // Add purchase fee as incentive
-        paymentToken.approve(address(berachainVault), purchaseFee);
-        berachainVault.addIncentive(address(paymentToken), purchaseFee, 0);
+        paymentToken.approve(address(rewardVault), purchaseFee);
+        rewardVault.addIncentive(address(paymentToken), purchaseFee, 0);
 
         lotteryParticipants[currentLotteryId].push(msg.sender);
         userTicketCount[msg.sender] += amount;
 
         emit TicketPurchased(msg.sender, currentLotteryId, amount);
+    }
+
+    function startLottery() external {
+        if (lotteryActive) revert LotteryAlreadyActive();
+
+        ticketPrice = 1 ether;
+        lotteryEndTime = block.timestamp + 1 days;
+        lotteryActive = true;
+
+        emit LotteryStarted(currentLotteryId, ticketPrice, lotteryEndTime);
     }
 
     function initiateDraw() external {
@@ -110,7 +168,6 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
         
         drawInProgress = true;
         
-        // Request random number from Gelato VRF
         bytes memory data = abi.encode(currentLotteryId, totalPool);
         _requestRandomness(data);
         
@@ -131,10 +188,31 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
         uint256 winnerFee = (prizePool * WINNER_FEE) / FEE_DENOMINATOR;
         uint256 winnerPrize = prizePool - winnerFee;
 
+        // Exit all participants from vault and burn their receipt tokens
+        for (uint256 i = 0; i < participantCount; i++) {
+            address participant = lotteryParticipants[lotteryId][i];
+            uint256 participantStake = userTicketCount[participant];
+            
+            if (participantStake > 0) {
+                // Withdraw from vault using delegateWithdraw
+                try rewardVault.delegateWithdraw(participant, participantStake) {
+                    // Burn receipt tokens
+                    receiptToken.burn(participant, participantStake);
+                    userTicketCount[participant] = 0;
+                    emit ReceiptTokensBurned(participant, participantStake);
+                } catch {
+                    // If withdrawal fails, we'll let the user handle it manually
+                    emit WithdrawalFailed(participant, participantStake);
+                }
+            }
+        }
+
+        // Transfer prize to winner
         paymentToken.safeTransfer(winner, winnerPrize);
 
-        paymentToken.approve(address(berachainVault), winnerFee);
-        berachainVault.addIncentive(address(paymentToken), winnerFee, 0);
+        // Add winner fee as incentive
+        paymentToken.approve(address(rewardVault), winnerFee);
+        rewardVault.addIncentive(address(paymentToken), winnerFee, 0);
 
         lotteryWinners[lotteryId] = winner;
         lotteryPrizes[lotteryId] = winnerPrize;
@@ -142,20 +220,14 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
         emit LotteryWinner(winner, winnerPrize);
         emit IncentiveAdded(winnerFee);
 
-        // Reset for next lottery
+        // Reset lottery state
         totalPool = 0;
         currentLotteryId += 1;
-        lotteryEndTime = block.timestamp + 1 days;
+        lotteryEndTime = 0; // Set to 0 until next lottery starts
         drawInProgress = false;
-
-        // Reset ticket counts
-        for (uint256 i = 0; i < participantCount; i++) {
-            address participant = lotteryParticipants[lotteryId][i];
-            userTicketCount[participant] = 0;
-        }
+        lotteryActive = false; // Ensure no one can stake until next lottery starts
     }
 
-    // View functions
     function getCurrentParticipants() external view returns (address[] memory) {
         return lotteryParticipants[currentLotteryId];
     }
@@ -177,5 +249,20 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
 
     function _operator() internal view virtual override returns (address) {
         return 0xB38D2cF1024731d4cAcD8ED70BDa77aC93022911;
+    }
+
+    function withdrawExcessGas() external onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > MIN_GAS_RESERVE, "No excess gas to withdraw");
+        uint256 excess = balance - MIN_GAS_RESERVE;
+        (bool success, ) = owner().call{value: excess}("");
+        require(success, "Gas withdrawal failed");
+    }
+
+    function setPrzHoney(address _przHoney) external onlyOwner {
+        require(_przHoney != address(0), "Zero address not allowed");
+        receiptToken = PrzHoney(_przHoney);
+        PrzHoney(_przHoney).approve(address(rewardVault), type(uint256).max);
+        emit PrzHoneySet(_przHoney);
     }
 } 
