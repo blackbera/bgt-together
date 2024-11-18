@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { ERC20 } from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
-import { SafeERC20 } from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import { Ownable } from "openzeppelin-contracts/contracts/access/Ownable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { GelatoVRFConsumerBase } from "vrf-contracts/GelatoVRFConsumerBase.sol";
 import { IBerachainRewardsVault } from "contracts-monorepo/pol/interfaces/IBerachainRewardsVault.sol";
 import { PrzHoney } from "./PrzHoney.sol";
@@ -54,6 +54,7 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
     uint256 private constant WINNER_FEE = 300; // 3%
     uint256 private constant FEE_DENOMINATOR = 10000;
     uint256 private constant MIN_GAS_RESERVE = 1 ether; // Minimum ETH to keep for gas
+    address public immutable operator;
 
     // State variables
     IERC20 public paymentToken;
@@ -74,16 +75,18 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
     mapping(uint256 => address) public lotteryWinners;
     mapping(uint256 => uint256) public lotteryPrizes;
     mapping(uint256 => bool) public prizesClaimed;
+    mapping(address => uint256) public userReceiptTokenBalance;
 
     constructor(
         address _paymentToken,
         address _owner,
-        address _rewardVault
-    ) GelatoVRFConsumerBase() Ownable(_owner) payable {
-        require(msg.value >= MIN_GAS_RESERVE, "Insufficient initial gas reserves");
+        address _rewardVault, 
+        address _operatorAddress
+    ) GelatoVRFConsumerBase() Ownable(_owner) {
         paymentToken = IERC20(_paymentToken);
         rewardVault = IBerachainRewardsVault(_rewardVault);
         currentLotteryId = 1;
+        operator = _operatorAddress;
     }
 
     // Allow contract to receive ETH
@@ -120,35 +123,49 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
     }
 
     function purchaseTicket(uint256 amount) external {
-        if (!lotteryActive) revert NoActiveLottery();
-        if (block.timestamp >= lotteryEndTime) revert LotteryEnded();
-        if (amount == 0) revert InvalidAmount();
-        if (address(this).balance < MIN_GAS_RESERVE) revert InsufficientGasReserves();
+    // Check lottery state
+    if (!lotteryActive) revert NoActiveLottery();
+    if (block.timestamp >= lotteryEndTime) revert LotteryEnded();
+    if (amount == 0) revert InvalidAmount();
 
-        uint256 totalCost = amount * ticketPrice;
-        uint256 purchaseFee = (totalCost * PURCHASE_FEE) / FEE_DENOMINATOR;
+    uint256 totalCost = amount * ticketPrice;
+    /*
+        Purchase Fee Calculation:
+        =========================
+        fee = (totalCost * PURCHASE_FEE) / FEE_DENOMINATOR
+        where:
+        - PURCHASE_FEE = 100 (1%)
+        - FEE_DENOMINATOR = 10000
         
-        paymentToken.safeTransferFrom(msg.sender, address(this), totalCost);
-        totalPool += (totalCost - purchaseFee);
+        Example for 1 BERA purchase:
+            fee = (1 BERA * 100) / 10000
+            fee = 0.01 BERA (1%)
         
-        // Mint receipt tokens directly to vault
-        receiptToken.mint(address(this), amount);
-        receiptToken.approve(address(this), amount);
+        Final amount to pool = totalCost - fee
+    */
+    uint256 purchaseFee = (totalCost * PURCHASE_FEE) / FEE_DENOMINATOR;
     
-        // Approve reward vault to spend tokens
-        receiptToken.approve(address(rewardVault), amount);
+    // Transfer total payment from user to vault
+    paymentToken.safeTransferFrom(msg.sender, address(this), totalCost);
+    // Add amount minus fee to prize pool
+    totalPool += (totalCost - purchaseFee);
     
-        // Delegate stake with receipt tokens
-        rewardVault.delegateStake(address(this), amount);
+    // Mint receipt tokens to user for tracking participation
+    receiptToken.mint(address(this), amount);
+    receiptToken.approve(address(rewardVault), amount);
+    rewardVault.delegateStake(msg.sender, amount);
 
-        paymentToken.approve(address(rewardVault), purchaseFee);
-        rewardVault.addIncentive(address(paymentToken), purchaseFee, 0);
+    
+    // Add purchase fee as incentive to rewards vault
+    paymentToken.approve(address(rewardVault), purchaseFee);
+    rewardVault.addIncentive(address(paymentToken), purchaseFee, 1);
 
-        lotteryParticipants[currentLotteryId].push(msg.sender);
-        userTicketCount[msg.sender] += amount;
+    // Record participation for lottery drawing
+    lotteryParticipants[currentLotteryId].push(msg.sender);
+    userTicketCount[msg.sender] += amount;
 
-        emit TicketPurchased(msg.sender, currentLotteryId, amount);
-    }
+    emit TicketPurchased(msg.sender, currentLotteryId, amount);
+}
 
     function startLottery() external {
         if (lotteryActive) revert LotteryAlreadyActive();
@@ -212,7 +229,7 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
 
         // Add winner fee as incentive
         paymentToken.approve(address(rewardVault), winnerFee);
-        rewardVault.addIncentive(address(paymentToken), winnerFee, 0);
+        rewardVault.addIncentive(address(paymentToken), winnerFee, 1);
 
         lotteryWinners[lotteryId] = winner;
         lotteryPrizes[lotteryId] = winnerPrize;
@@ -247,8 +264,13 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
         participants = lotteryParticipants[lotteryId];
     }
 
-    function _operator() internal view virtual override returns (address) {
-        return 0xB38D2cF1024731d4cAcD8ED70BDa77aC93022911;
+    // Add this function to expose the operator address
+    function getOperator() external view returns (address) {
+        return operator;
+    }
+
+    function _operator() internal view override returns (address) {
+        return operator;
     }
 
     function withdrawExcessGas() external onlyOwner {
