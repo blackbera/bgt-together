@@ -8,6 +8,7 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { GelatoVRFConsumerBase } from "vrf-contracts/GelatoVRFConsumerBase.sol";
 import { IBerachainRewardsVault } from "contracts-monorepo/pol/interfaces/IBerachainRewardsVault.sol";
 import { PrzHoney } from "./PrzHoney.sol";
+import {console} from "forge-std/console.sol";
 
 contract LotteryReceiptToken is ERC20 {
     constructor() ERC20("przHoney", "przHoney") {}
@@ -48,6 +49,11 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
     error NotWinner();
     error InsufficientGasReserves();
     error StakingNotAllowed();
+    error VRFRequestAlreadyPending();
+    error VRFInvalidRoundId(uint256 roundId);
+    error VRFInvalidRequestData();
+    error VRFInvalidRandomness();
+    error VRFInvalidParticipantCount();
 
     // Constants
     uint256 private constant PURCHASE_FEE = 100; // 1%
@@ -185,8 +191,17 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
         
         drawInProgress = true;
         
+        // Add logging
+        console.log("Initiating draw for lottery:", currentLotteryId);
+        console.log("Total pool:", totalPool);
+        console.log("Participant count:", lotteryParticipants[currentLotteryId].length);
+        
         bytes memory data = abi.encode(currentLotteryId, totalPool);
-        _requestRandomness(data);
+        bytes memory requestData = abi.encode(0, data);
+        console.log("Request data prepared");
+        
+        _requestRandomness(requestData);
+        console.log("Randomness requested");
         
         emit DrawInitiated(currentLotteryId);
     }
@@ -196,14 +211,26 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
         uint256 requestId,
         bytes memory extraData
     ) internal override {
+        console.log("Fulfilling randomness");
+        console.log("Randomness received:", randomness);
+        console.log("Request ID:", requestId);
+        
         (uint256 lotteryId, uint256 prizePool) = abi.decode(extraData, (uint256, uint256));
+        console.log("Decoded lottery ID:", lotteryId);
+        console.log("Decoded prize pool:", prizePool);
         
         uint256 participantCount = lotteryParticipants[lotteryId].length;
+        if (participantCount == 0) revert VRFInvalidParticipantCount();
+        
+        console.log("Selecting winner from", participantCount, "participants");
         uint256 winnerIndex = randomness % participantCount;
         address winner = lotteryParticipants[lotteryId][winnerIndex];
+        console.log("Selected winner:", winner);
         
         uint256 winnerFee = (prizePool * WINNER_FEE) / FEE_DENOMINATOR;
         uint256 winnerPrize = prizePool - winnerFee;
+        console.log("Winner prize:", winnerPrize);
+        console.log("Winner fee:", winnerFee);
 
         // Exit all participants from vault and burn their receipt tokens
         for (uint256 i = 0; i < participantCount; i++) {
@@ -211,23 +238,27 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
             uint256 participantStake = userTicketCount[participant];
             
             if (participantStake > 0) {
-                // Withdraw from vault using delegateWithdraw
+                console.log("Processing participant:", participant);
+                console.log("Stake amount:", participantStake);
+                
                 try rewardVault.delegateWithdraw(participant, participantStake) {
-                    // Burn receipt tokens
                     receiptToken.burn(participant, participantStake);
                     userTicketCount[participant] = 0;
                     emit ReceiptTokensBurned(participant, participantStake);
+                    console.log("Successfully processed participant");
                 } catch {
-                    // If withdrawal fails, we'll let the user handle it manually
+                    console.log("Failed to process participant");
                     emit WithdrawalFailed(participant, participantStake);
                 }
             }
         }
 
         // Transfer prize to winner
+        console.log("Transferring prize to winner");
         paymentToken.safeTransfer(winner, winnerPrize);
 
         // Add winner fee as incentive
+        console.log("Adding winner fee as incentive");
         paymentToken.approve(address(rewardVault), winnerFee);
         rewardVault.addIncentive(address(paymentToken), winnerFee, 1);
 
@@ -238,11 +269,12 @@ contract LotteryVault is GelatoVRFConsumerBase, Ownable {
         emit IncentiveAdded(winnerFee);
 
         // Reset lottery state
+        console.log("Resetting lottery state");
         totalPool = 0;
         currentLotteryId += 1;
-        lotteryEndTime = 0; // Set to 0 until next lottery starts
+        lotteryEndTime = 0;
         drawInProgress = false;
-        lotteryActive = false; // Ensure no one can stake until next lottery starts
+        lotteryActive = false;
     }
 
     function getCurrentParticipants() external view returns (address[] memory) {

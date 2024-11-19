@@ -1,6 +1,6 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import {
-  berachainTestnetbArtio
+  berachainTestnetbArtio, localhost
 } from 'wagmi/chains';
 
 export const config = getDefaultConfig({
@@ -8,6 +8,7 @@ export const config = getDefaultConfig({
   projectId: 'YOUR_PROJECT_ID',
   chains: [
     berachainTestnetbArtio,
+    localhost,
     ...(process.env.NEXT_PUBLIC_ENABLE_TESTNETS === 'true' ? [berachainTestnetbArtio] : []),
   ],
   ssr: true,

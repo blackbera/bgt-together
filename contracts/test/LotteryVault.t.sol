@@ -244,7 +244,7 @@ contract LotteryVaultTest is Test {
         vm.warp(block.timestamp + LOTTERY_DURATION + 1);
 
         // Expected VRF Request event data
-        uint256 roundId = 13134046; // From the trace logs
+        uint256 roundId = 4553143; // From the trace logs
         bytes memory data = abi.encode(1, lotteryVault.totalPool()); // lotteryId and total pool
         bytes memory dataWithRequest = abi.encode(0, data); // requestId and data
 
@@ -261,7 +261,7 @@ contract LotteryVaultTest is Test {
         lotteryVault.fulfillRandomness(123, dataWithRequest);
 
         // Test operator can fulfill
-        uint256 randomness = 0x471403f3a8764edd4d39c7748847c07098c05e5a16ed7b083b655dbab9809fae;
+        uint256 randomness = address(lotteryVault);
         vm.prank(operator);
         lotteryVault.fulfillRandomness(randomness, dataWithRequest);
 

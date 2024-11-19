@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "lottahoney": "./scripts/setup-local.sh"
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.2.0",
