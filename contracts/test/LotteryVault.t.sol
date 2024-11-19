@@ -261,7 +261,7 @@ contract LotteryVaultTest is Test {
         lotteryVault.fulfillRandomness(123, dataWithRequest);
 
         // Test operator can fulfill
-        uint256 randomness = address(lotteryVault);
+        uint256 randomness = 0x670c890348fbf2618741e87223634bf817898cfa3cb2ee0d409c5e923d10f407;
         vm.prank(operator);
         lotteryVault.fulfillRandomness(randomness, dataWithRequest);
 
